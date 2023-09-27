@@ -2,6 +2,8 @@
  * @module provider/websocket
  */
 
+// 注意，这歌不是服务端代码，需要从客户端的角度进行解读！！！！
+
 /* eslint-env browser */
 
 import * as Y from 'yjs' // eslint-disable-line
@@ -11,14 +13,14 @@ import * as encoding from 'lib0/encoding'
 import * as decoding from 'lib0/decoding'
 import * as syncProtocol from 'y-protocols/sync'
 import * as authProtocol from 'y-protocols/auth'
-import * as awarenessProtocol from 'y-protocols/awareness'
+import * as awarenessProtocol from './y-protocols/awareness'
 import { Observable } from 'lib0/observable'
 import * as math from 'lib0/math'
 import * as url from 'lib0/url'
 
-export const messageSync = 0
+export const messageSync = 0 // Share Data, 同步消息
 export const messageQueryAwareness = 3
-export const messageAwareness = 1
+export const messageAwareness = 1 // Awareness 鉴权消息
 export const messageAuth = 2
 
 /**
@@ -27,7 +29,7 @@ export const messageAuth = 2
  */
 const messageHandlers = []
 
-messageHandlers[messageSync] = (
+messageHandlers[ messageSync ] = (
   encoder,
   decoder,
   provider,
@@ -49,7 +51,7 @@ messageHandlers[messageSync] = (
   }
 }
 
-messageHandlers[messageQueryAwareness] = (
+messageHandlers[ messageQueryAwareness ] = (
   encoder,
   _decoder,
   provider,
@@ -66,7 +68,7 @@ messageHandlers[messageQueryAwareness] = (
   )
 }
 
-messageHandlers[messageAwareness] = (
+messageHandlers[ messageAwareness ] = (
   _encoder,
   decoder,
   provider,
@@ -80,7 +82,7 @@ messageHandlers[messageAwareness] = (
   )
 }
 
-messageHandlers[messageAuth] = (
+messageHandlers[ messageAuth ] = (
   _encoder,
   decoder,
   provider,
@@ -114,7 +116,7 @@ const readMessage = (provider, buf, emitSynced) => {
   const decoder = decoding.createDecoder(buf)
   const encoder = encoding.createEncoder()
   const messageType = decoding.readVarUint(decoder)
-  const messageHandler = provider.messageHandlers[messageType]
+  const messageHandler = provider.messageHandlers[ messageType ]
   if (/** @type {any} */ (messageHandler)) {
     messageHandler(encoder, decoder, provider, emitSynced, messageType)
   } else {
@@ -143,10 +145,10 @@ const setupWS = (provider) => {
       }
     }
     websocket.onerror = (event) => {
-      provider.emit('connection-error', [event, provider])
+      provider.emit('connection-error', [ event, provider ])
     }
     websocket.onclose = (event) => {
-      provider.emit('connection-close', [event, provider])
+      provider.emit('connection-close', [ event, provider ])
       provider.ws = null
       provider.wsconnecting = false
       if (provider.wsconnected) {
@@ -160,9 +162,9 @@ const setupWS = (provider) => {
           ),
           provider
         )
-        provider.emit('status', [{
+        provider.emit('status', [ {
           status: 'disconnected'
-        }])
+        } ])
       } else {
         provider.wsUnsuccessfulReconnects++
       }
@@ -182,9 +184,9 @@ const setupWS = (provider) => {
       provider.wsconnecting = false
       provider.wsconnected = true
       provider.wsUnsuccessfulReconnects = 0
-      provider.emit('status', [{
+      provider.emit('status', [ {
         status: 'connected'
-      }])
+      } ])
       // always send sync step 1 when connected
       const encoder = encoding.createEncoder()
       encoding.writeVarUint(encoder, messageSync)
@@ -203,9 +205,9 @@ const setupWS = (provider) => {
         websocket.send(encoding.toUint8Array(encoderAwarenessState))
       }
     }
-    provider.emit('status', [{
+    provider.emit('status', [ {
       status: 'connecting'
-    }])
+    } ])
   }
 }
 
@@ -250,7 +252,7 @@ export class WebsocketProvider extends Observable {
    * @param {number} [opts.maxBackoffTime] Maximum amount of time to wait before trying to reconnect (we try to reconnect using exponential backoff)
    * @param {boolean} [opts.disableBc] Disable cross-tab BroadcastChannel communication
    */
-  constructor (serverUrl, roomname, doc, {
+  constructor(serverUrl, roomname, doc, {
     connect = true,
     awareness = new awarenessProtocol.Awareness(doc),
     params = {},
@@ -261,7 +263,7 @@ export class WebsocketProvider extends Observable {
   } = {}) {
     super()
     // ensure that url is always ends with /
-    while (serverUrl[serverUrl.length - 1] === '/') {
+    while (serverUrl[ serverUrl.length - 1 ] === '/') {
       serverUrl = serverUrl.slice(0, serverUrl.length - 1)
     }
     const encodedParams = url.encodeQueryParams(params)
@@ -341,23 +343,30 @@ export class WebsocketProvider extends Observable {
      * @param {any} _origin
      */
     this._awarenessUpdateHandler = ({ added, updated, removed }, _origin) => {
+      // 当本地awareness发生更新的时候
       const changedClients = added.concat(updated).concat(removed)
       const encoder = encoding.createEncoder()
+      // 处理下Socket消息
+      // 1. 消息类型，这个是awareness类型
       encoding.writeVarUint(encoder, messageAwareness)
+      // 2. 变更信息：把所有发生改动的client和对应的clock、state打成二进制，然后再写到现在的encoder中
       encoding.writeVarUint8Array(
         encoder,
         awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients)
       )
+      // 推到服务端进行广播
       broadcastMessage(this, encoding.toUint8Array(encoder))
     }
     this._unloadHandler = () => {
+      // 比如在关闭页面前，主动告诉服务端可以吧我Kill了
       awarenessProtocol.removeAwarenessStates(
         this.awareness,
-        [doc.clientID],
+        [ doc.clientID ],
         'window unload'
       )
     }
     if (typeof window !== 'undefined') {
+      // 绑到页面unload上了
       window.addEventListener('unload', this._unloadHandler)
     } else if (typeof process !== 'undefined') {
       process.on('exit', this._unloadHandler)
@@ -367,7 +376,7 @@ export class WebsocketProvider extends Observable {
       if (
         this.wsconnected &&
         messageReconnectTimeout <
-          time.getUnixTime() - this.wsLastMessageReceived
+        time.getUnixTime() - this.wsLastMessageReceived
       ) {
         // no message received in a long time - not even your own awareness
         // updates (which are updated every 15 seconds)
@@ -382,19 +391,19 @@ export class WebsocketProvider extends Observable {
   /**
    * @type {boolean}
    */
-  get synced () {
+  get synced() {
     return this._synced
   }
 
-  set synced (state) {
+  set synced(state) {
     if (this._synced !== state) {
       this._synced = state
-      this.emit('synced', [state])
-      this.emit('sync', [state])
+      this.emit('synced', [ state ])
+      this.emit('sync', [ state ])
     }
   }
 
-  destroy () {
+  destroy() {
     if (this._resyncInterval !== 0) {
       clearInterval(this._resyncInterval)
     }
@@ -410,7 +419,7 @@ export class WebsocketProvider extends Observable {
     super.destroy()
   }
 
-  connectBc () {
+  connectBc() {
     if (this.disableBc) {
       return
     }
@@ -453,7 +462,7 @@ export class WebsocketProvider extends Observable {
     )
   }
 
-  disconnectBc () {
+  disconnectBc() {
     // broadcast message with local awareness state set to null (indicating disconnect)
     const encoder = encoding.createEncoder()
     encoding.writeVarUint(encoder, messageAwareness)
@@ -470,7 +479,7 @@ export class WebsocketProvider extends Observable {
     }
   }
 
-  disconnect () {
+  disconnect() {
     this.shouldConnect = false
     this.disconnectBc()
     if (this.ws !== null) {
@@ -478,7 +487,7 @@ export class WebsocketProvider extends Observable {
     }
   }
 
-  connect () {
+  connect() {
     this.shouldConnect = true
     if (!this.wsconnected && this.ws === null) {
       setupWS(this)
