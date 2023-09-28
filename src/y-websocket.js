@@ -439,6 +439,7 @@ export class WebsocketProvider extends Observable {
     syncProtocol.writeSyncStep2(encoderState, this.doc)
     bc.publish(this.bcChannel, encoding.toUint8Array(encoderState), this)
     // write queryAwareness
+    // 这个BC是浏览器内的BC， 用于Tab间内部快速转发信息用的，我们可以
     const encoderAwarenessQuery = encoding.createEncoder()
     encoding.writeVarUint(encoderAwarenessQuery, messageQueryAwareness)
     bc.publish(

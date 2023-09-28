@@ -42,7 +42,7 @@ if (typeof persistenceDir === 'string') {
         ldb.storeUpdate(docName, update)
       })
     },
-    writeState: async (docName, ydoc) => {}
+    writeState: async (docName, ydoc) => { }
   }
 }
 
@@ -88,7 +88,7 @@ class WSSharedDoc extends Y.Doc {
   /**
    * @param {string} name
    */
-  constructor (name) {
+  constructor(name) {
     super({ gc: gcEnabled })
     this.name = name
     /**
@@ -155,6 +155,7 @@ const getYDoc = (docname, gc = true) => map.setIfUndefined(docs, docname, () => 
 exports.getYDoc = getYDoc
 
 /**
+ * 解析原始传输数据，确认数据类型然后执行对应的数据更新方法（syncData、Awareness）
  * @param {any} conn
  * @param {WSSharedDoc} doc
  * @param {Uint8Array} message
@@ -177,13 +178,14 @@ const messageListener = (conn, doc, message) => {
         }
         break
       case messageAwareness: {
+        // 执行Awareness更新方法
         awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(decoder), conn)
         break
       }
     }
   } catch (err) {
     console.error(err)
-    doc.emit('error', [err])
+    doc.emit('error', [ err ])
   }
 }
 
@@ -217,6 +219,7 @@ const closeConn = (doc, conn) => {
  * @param {Uint8Array} m
  */
 const send = (doc, conn, m) => {
+  // WS发送程序，有异常就断连
   if (conn.readyState !== wsReadyStateConnecting && conn.readyState !== wsReadyStateOpen) {
     closeConn(doc, conn)
   }
@@ -230,20 +233,31 @@ const send = (doc, conn, m) => {
 const pingTimeout = 30000
 
 /**
+ * 当有新连接，连接到Server上时触发，docName就是RoomID
  * @param {any} conn
  * @param {any} req
  * @param {any} opts
  */
-exports.setupWSConnection = (conn, req, { docName = req.url.slice(1).split('?')[0], gc = true } = {}) => {
+exports.setupWSConnection = (conn, req, { docName = req.url.slice(1).split('?')[ 0 ], gc = true } = {}) => {
+  // 设置我们后续的连接，使用二进制传播
   conn.binaryType = 'arraybuffer'
   // get doc, initialize if it does not exist yet
+
+  // 这个Doc是Server封装的WSShareDoc， 每个Room都有一个实例
   const doc = getYDoc(docName, gc)
+
+  // 给wsShareDoc 里添加上当前连接
   doc.conns.set(conn, new Set())
   // listen and reply to events
+
+  // 当收到来自客户端的数据时执行messageListener方法，这个方法是干啥的呢？解析 + 分发任务
   conn.on('message', /** @param {ArrayBuffer} message */ message => messageListener(conn, doc, new Uint8Array(message)))
 
-  // Check if connection is still alive
+  // 检查连接是否仍然有效
   let pongReceived = true
+
+  // 每30秒检查一下当前连接状态
+  // 如果没收到pong， 就可以断开链接了，并wsShareDoc删除此链接。如果收到了，那么就发一个ping消息给客户端
   const pingInterval = setInterval(() => {
     if (!pongReceived) {
       if (doc.conns.has(conn)) {
@@ -260,10 +274,15 @@ exports.setupWSConnection = (conn, req, { docName = req.url.slice(1).split('?')[
       }
     }
   }, pingTimeout)
+
+
+  // 收到了close消息，直接关闭就完了 
   conn.on('close', () => {
     closeConn(doc, conn)
     clearInterval(pingInterval)
   })
+
+  // 收到了pong消息，存一下，后面给链接状态检查用
   conn.on('pong', () => {
     pongReceived = true
   })
@@ -271,6 +290,7 @@ exports.setupWSConnection = (conn, req, { docName = req.url.slice(1).split('?')[
   // scope
   {
     // send sync step 1
+    // 直接先发一下shareData数据和Awareness数据，这是服务端主动推给客户端的
     const encoder = encoding.createEncoder()
     encoding.writeVarUint(encoder, messageSync)
     syncProtocol.writeSyncStep1(encoder, doc)
