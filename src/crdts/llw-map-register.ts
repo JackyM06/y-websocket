@@ -49,4 +49,33 @@ export class LWWMap<T> {
       }
     }
   }
+
+  set(key: string, value: T) {
+    const register = this.data.get(key);
+
+    if (register) {
+      register.set(value);
+    } else {
+      this.data.set(
+        key,
+        new LWWRegister(this.id, {
+          peer: this.id,
+          timestamp: 1,
+          value,
+        })
+      );
+    }
+  }
+
+  get(key: string) {
+    return this.data.get(key)?.value || undefined;
+  }
+
+  delete(key: string) {
+    this.data.get(key)?.set(null);
+  }
+
+  has(key: string) {
+    return this.data.get(key)?.value !== null;
+  }
 }

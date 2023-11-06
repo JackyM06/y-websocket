@@ -22,7 +22,7 @@ export class LWWRegister<T> {
     return this.state.value;
   }
 
-  set value(value: T) {
+  set(value: T) {
     this.state = {
       peer: this.id,
       timestamp: this.state.timestamp + 1,
